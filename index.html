@@ -1,0 +1,253 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Giám sát nhiệt độ - HQUangr</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: -apple-system, Arial, sans-serif; background: #f0f2f5; color: #222; }
+  .header { background: #1e40af; color: #fff; padding: 16px 20px; display: flex; justify-content: space-between; align-items: center; }
+  .header h1 { font-size: 18px; font-weight: 600; }
+  .status-dot { width: 10px; height: 10px; border-radius: 50%; background: #86efac; display: inline-block; margin-right: 6px; }
+  .status-dot.offline { background: #fca5a5; }
+  .container { max-width: 900px; margin: 0 auto; padding: 20px; }
+  .timestamp { color: #666; font-size: 13px; margin-bottom: 16px; }
+  .grid4 { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px; margin-bottom: 20px; }
+  .card { background: #fff; border-radius: 12px; padding: 18px; box-shadow: 0 1px 4px rgba(0,0,0,0.08); }
+  .card .label { font-size: 12px; color: #888; margin-bottom: 6px; font-weight: 500; text-transform: uppercase; letter-spacing: 0.04em; }
+  .card .value { font-size: 32px; font-weight: 700; color: #1e293b; }
+  .card .unit { font-size: 14px; color: #94a3b8; font-weight: 400; }
+  .card.alarm { background: #fef2f2; border: 1px solid #fecaca; }
+  .card.alarm .value { color: #dc2626; }
+  .card.alarm .label { color: #ef4444; }
+  .section { background: #fff; border-radius: 12px; padding: 20px; margin-bottom: 20px; box-shadow: 0 1px 4px rgba(0,0,0,0.08); }
+  .section h2 { font-size: 15px; font-weight: 600; margin-bottom: 16px; color: #374151; }
+  .control-row { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; margin-bottom: 12px; }
+  .limit-display { font-size: 24px; font-weight: 700; color: #1e40af; min-width: 60px; text-align: center; }
+  button { padding: 10px 18px; border-radius: 8px; border: none; font-size: 14px; font-weight: 500; cursor: pointer; transition: 0.15s; }
+  .btn-blue { background: #2563eb; color: #fff; }
+  .btn-blue:hover { background: #1d4ed8; }
+  .btn-green { background: #16a34a; color: #fff; }
+  .btn-green:hover { background: #15803d; }
+  .btn-red { background: #dc2626; color: #fff; }
+  .btn-red:hover { background: #b91c1c; }
+  .btn-gray { background: #e5e7eb; color: #374151; }
+  .btn-gray:hover { background: #d1d5db; }
+  .btn-orange { background: #ea580c; color: #fff; }
+  .btn-orange:hover { background: #c2410c; }
+  .mute-status { display: inline-block; padding: 4px 12px; border-radius: 20px; font-size: 12px; font-weight: 600; }
+  .mute-on { background: #fef3c7; color: #92400e; }
+  .mute-off { background: #d1fae5; color: #065f46; }
+  .alarm-banner { display: none; background: #fef2f2; border: 1px solid #fecaca; border-radius: 10px; padding: 14px 18px; margin-bottom: 16px; color: #dc2626; font-weight: 600; font-size: 15px; }
+  .alarm-banner.show { display: block; }
+  canvas { max-height: 280px; }
+  .csv-row { display: flex; gap: 10px; flex-wrap: wrap; }
+  .confirm-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.4); z-index: 100; align-items: center; justify-content: center; }
+  .confirm-overlay.show { display: flex; }
+  .confirm-box { background: #fff; border-radius: 12px; padding: 24px; max-width: 320px; width: 90%; text-align: center; }
+  .confirm-box p { margin-bottom: 16px; color: #374151; }
+  .confirm-box .row { display: flex; gap: 10px; justify-content: center; }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <h1>🌡️ Giám sát nhiệt độ</h1>
+  <div>
+    <span class="status-dot" id="statusDot"></span>
+    <span id="statusText" style="font-size:13px">Đang kết nối...</span>
+  </div>
+</div>
+
+<div class="container">
+  <div class="timestamp" id="lastUpdate">--</div>
+
+  <div class="alarm-banner" id="alarmBanner">⚠️ CẢNH BÁO: Nhiệt độ T2 đã đạt ngưỡng làm mát!</div>
+
+  <!-- 4 the nhiet do -->
+  <div class="grid4" id="tempGrid">
+    <div class="card"><div class="label">T1 (Thermistor)</div><div class="value" id="v0">--<span class="unit">°C</span></div></div>
+    <div class="card"><div class="label">T2 (Cảnh báo)</div><div class="value" id="v1">--<span class="unit">°C</span></div></div>
+    <div class="card"><div class="label">T3</div><div class="value" id="v2">--<span class="unit">°C</span></div></div>
+    <div class="card"><div class="label">T4</div><div class="value" id="v3">--<span class="unit">°C</span></div></div>
+  </div>
+
+  <!-- Dieu khien -->
+  <div class="section">
+    <h2>Điều khiển từ xa</h2>
+    <div class="control-row">
+      <span style="font-size:14px;color:#555;">Ngưỡng T2:</span>
+      <button class="btn-gray" onclick="sendCmd('limitDown')">▼ Giảm</button>
+      <span class="limit-display" id="limitDisplay">--°C</span>
+      <button class="btn-blue" onclick="sendCmd('limitUp')">▲ Tăng</button>
+    </div>
+    <div class="control-row">
+      <span style="font-size:14px;color:#555;">Trạng thái Mute:</span>
+      <span class="mute-status" id="muteStatus">--</span>
+      <button class="btn-orange" onclick="sendCmd('mute')">🔇 Mute Buzzer</button>
+    </div>
+    <p style="font-size:12px;color:#9ca3af;margin-top:8px;">Lệnh sẽ được gửi tới ESP32 trong vòng 2 giây</p>
+  </div>
+
+  <!-- Bieu do -->
+  <div class="section">
+    <h2>Biểu đồ nhiệt độ (60 điểm gần nhất)</h2>
+    <canvas id="tempChart"></canvas>
+  </div>
+
+  <!-- CSV -->
+  <div class="section">
+    <h2>Dữ liệu CSV</h2>
+    <p style="font-size:13px;color:#666;margin-bottom:12px;">Tải toàn bộ lịch sử nhiệt độ từ Firebase về máy dưới dạng file CSV.</p>
+    <div class="csv-row">
+      <button class="btn-green" onclick="downloadCsv()">⬇️ Tải CSV từ Firebase</button>
+      <button class="btn-red" onclick="showConfirm()">🗑️ Xóa lịch sử Firebase</button>
+    </div>
+  </div>
+</div>
+
+<!-- Hop xac nhan xoa -->
+<div class="confirm-overlay" id="confirmOverlay">
+  <div class="confirm-box">
+    <p>⚠️ Xóa toàn bộ lịch sử nhiệt độ trên Firebase? Hành động này không thể hoàn tác.</p>
+    <div class="row">
+      <button class="btn-red" onclick="clearHistory()">Xóa ngay</button>
+      <button class="btn-gray" onclick="hideConfirm()">Hủy</button>
+    </div>
+  </div>
+</div>
+
+<script type="module">
+import { initializeApp } from "https://www.gstatic.com/firebasejs/12.15.0/firebase-app.js";
+import { getDatabase, ref, onValue, set, push, remove, get } from "https://www.gstatic.com/firebasejs/12.15.0/firebase-database.js";
+
+const firebaseConfig = {
+  apiKey: "AIzaSyAZF3ro4YVm2Mb_fmhaL3mCin24rSCuxB4",
+  authDomain: "thermistor-temprature-hquangr.firebaseapp.com",
+  databaseURL: "https://thermistor-temprature-hquangr-default-rtdb.asia-southeast1.firebasedatabase.app",
+  projectId: "thermistor-temprature-hquangr",
+  storageBucket: "thermistor-temprature-hquangr.firebasestorage.app",
+  messagingSenderId: "493775550315",
+  appId: "1:493775550315:web:774f06a9677d56d1083e2e"
+};
+
+const app = initializeApp(firebaseConfig);
+const db = getDatabase(app);
+
+// --- Bieu do ---
+const ctx = document.getElementById('tempChart').getContext('2d');
+const chart = new Chart(ctx, {
+  type: 'line',
+  data: {
+    labels: [],
+    datasets: [
+      { label: 'T1', data: [], borderColor: '#6366f1', backgroundColor: 'transparent', tension: 0.3, pointRadius: 2 },
+      { label: 'T2 (cảnh báo)', data: [], borderColor: '#ef4444', backgroundColor: 'transparent', tension: 0.3, pointRadius: 2 },
+      { label: 'T3', data: [], borderColor: '#10b981', backgroundColor: 'transparent', tension: 0.3, pointRadius: 2 },
+      { label: 'T4', data: [], borderColor: '#f59e0b', backgroundColor: 'transparent', tension: 0.3, pointRadius: 2 },
+    ]
+  },
+  options: {
+    responsive: true,
+    animation: false,
+    plugins: { legend: { position: 'top' } },
+    scales: {
+      y: { title: { display: true, text: '°C' } },
+      x: { ticks: { maxTicksLimit: 8, maxRotation: 0 } }
+    }
+  }
+});
+
+const MAX_POINTS = 60;
+let historyBuffer = [];
+
+// --- Lang nghe du lieu hien tai ---
+onValue(ref(db, 'current'), (snap) => {
+  const d = snap.val();
+  if (!d) return;
+
+  document.getElementById('lastUpdate').textContent = 'Cập nhật lúc: ' + (d.timestamp || '--');
+  document.getElementById('statusDot').className = 'status-dot';
+  document.getElementById('statusText').textContent = 'Trực tuyến';
+
+  const temps = [d.T1, d.T2, d.T3, d.T4];
+  const ids = ['v0','v1','v2','v3'];
+  const cards = document.getElementById('tempGrid').children;
+
+  for (let i = 0; i < 4; i++) {
+    const val = temps[i] != null ? temps[i].toFixed(1) + '°C' : '--';
+    document.getElementById(ids[i]).innerHTML = val;
+    cards[i].className = 'card' + (i === 1 && d.alarm ? ' alarm' : '');
+  }
+
+  document.getElementById('limitDisplay').textContent = (d.limit != null ? d.limit.toFixed(0) : '--') + '°C';
+  const muteEl = document.getElementById('muteStatus');
+  muteEl.textContent = d.muted ? 'Đang tắt tiếng' : 'Hoạt động';
+  muteEl.className = 'mute-status ' + (d.muted ? 'mute-on' : 'mute-off');
+
+  const banner = document.getElementById('alarmBanner');
+  banner.className = 'alarm-banner' + (d.alarm ? ' show' : '');
+});
+
+// --- Lang nghe lich su va cap nhat bieu do ---
+onValue(ref(db, 'history'), (snap) => {
+  const data = snap.val();
+  if (!data) return;
+
+  const entries = Object.values(data).slice(-MAX_POINTS);
+  const labels = entries.map(e => e.ts ? e.ts.substring(11, 19) : '');
+
+  chart.data.labels = labels;
+  chart.data.datasets[0].data = entries.map(e => e.T1 ?? null);
+  chart.data.datasets[1].data = entries.map(e => e.T2 ?? null);
+  chart.data.datasets[2].data = entries.map(e => e.T3 ?? null);
+  chart.data.datasets[3].data = entries.map(e => e.T4 ?? null);
+  chart.update();
+  historyBuffer = entries;
+});
+
+// --- Gui lenh ---
+window.sendCmd = async function(cmd) {
+  const cmdRef = ref(db, 'commands/' + cmd);
+  await set(cmdRef, true);
+  console.log('Da gui lenh:', cmd);
+};
+
+// --- Tai CSV ---
+window.downloadCsv = function() {
+  if (historyBuffer.length === 0) { alert('Chua co du lieu lich su.'); return; }
+  let csv = 'timestamp,T1,T2,T3,T4\n';
+  for (const e of historyBuffer) {
+    csv += `${e.ts ?? ''},${e.T1 ?? 'NaN'},${e.T2 ?? 'NaN'},${e.T3 ?? 'NaN'},${e.T4 ?? 'NaN'}\n`;
+  }
+  const blob = new Blob([csv], { type: 'text/csv' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = 'nhiet_do_' + new Date().toISOString().slice(0,10) + '.csv';
+  a.click();
+  URL.revokeObjectURL(url);
+};
+
+// --- Xoa lich su Firebase ---
+window.showConfirm = function() { document.getElementById('confirmOverlay').className = 'confirm-overlay show'; };
+window.hideConfirm = function() { document.getElementById('confirmOverlay').className = 'confirm-overlay'; };
+window.clearHistory = async function() {
+  await remove(ref(db, 'history'));
+  hideConfirm();
+  alert('Da xoa toan bo lich su Firebase.');
+};
+
+// Offline detection
+setTimeout(() => {
+  const dot = document.getElementById('statusDot');
+  if (dot.className.includes('offline') || document.getElementById('lastUpdate').textContent === '--') {
+    dot.className = 'status-dot offline';
+    document.getElementById('statusText').textContent = 'Mất kết nối';
+  }
+}, 15000);
+</script>
+</body>
+</html>
